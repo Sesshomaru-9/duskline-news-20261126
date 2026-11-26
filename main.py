@@ -1,320 +1,437 @@
 #!/usr/bin/env python3
-"""Duskline News -- 26 November 2026.
+"""Duskline News — front page for Thursday 26 November 2026.
 
-Draws a one-page newspaper front page (1024x1024 PNG) summing up the
-world news of Thursday 26 November 2026, using only Pillow and the
-standard library. No network, no randomness, no clock: two runs write
-byte-identical output.
+Builds a single 1024x1024 newspaper front page (PNG) that sums up the
+world news of the day: a Gulf lead story, six further stories in a
+two-column grid, and a wire ticker along the bottom.
 
-The program writes exactly one file, entry.png, into
-$MAKEFUN_OUTPUT_DIR (or a fresh temp directory outside this repository
-when the variable is unset). It never writes into its own repository:
-if the output directory is the repository or inside it, it refuses
-and exits 0. It never raises an exception.
+Everything is drawn procedurally with Pillow — no network, no external
+files, no clock, no randomness — so running the program twice produces
+a byte-identical PNG. The only file it writes is
+``$MAKEFUN_OUTPUT_DIR/entry.png``.
+
+Usage:
+    MAKEFUN_OUTPUT_DIR=/path/to/out python3 main.py
 """
 
+import hashlib
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-W, H = 1024, 1024
+# ---------------------------------------------------------------- page setup
 
-PAPER = (246, 241, 227)      # warm newsprint cream
-INK = (20, 18, 16)          # near-black ink
-RED = (176, 32, 32)         # headline accent red
-NAVY = (27, 58, 92)         # night-sky blue
-SKY_DARK = (24, 30, 52)
-DUSK = (214, 110, 44)       # dusk orange for the refinery sky
-GOLD = (212, 160, 60)
-GREY = (90, 84, 74)
-RULE = (120, 110, 95)
-TICKER_BG = (24, 24, 22)
+PAGE_W = 1024
+PAGE_H = 1024
+MARGIN = 36
+CONTENT_W = PAGE_W - 2 * MARGIN
 
-FONT_DIR = "/usr/share/fonts/truetype/dejavu"
+PAPER = (246, 239, 221)      # warm newsprint
+INK = (18, 18, 18)           # near-black body text
+SOFT_INK = (74, 74, 74)      # grey secondary text
+ACCENT = (163, 18, 18)       # red kickers and dateline
+RULE = (18, 18, 18)          # hairline rules
+BAND = (14, 14, 14)          # black wire band
+BAND_TEXT = (245, 245, 245)
+AMBER = (232, 160, 32)
+
+EDITION_LINE = "THURSDAY, 26 NOVEMBER 2026"
+EDITION_NOTE = "THE WORLD IN ONE PAGE  •  No. 330"
+FOOTER_LINE = (
+    "Sources: Reuters  •  Associated Press  •  The Hindu  •  C54 News  •  "
+    "Daily Debrief briefing of 26 November 2026."
+)
+
+# ------------------------------------------------------------------- stories
+
+LEAD = {
+    "tag": "GULF  •  LEAD STORY",
+    "head": "Houthi missile hits Ras Tanura refinery; Riyadh tower struck again",
+    "body": (
+        "Houthi missiles struck Saudi Arabia's Ras Tanura oil refinery, "
+        "while a drone hit Riyadh's tallest tower for the second time in a "
+        "week, wounding 11 people. The strikes mark a sharp escalation in "
+        "the Gulf, threatening the region's oil lifeline and rattling "
+        "markets."
+    ),
+    "caption": "RAS TANURA REFINERY AT DUSK",
+}
+
+STORIES = [
+    {
+        "tag": "SPACE",
+        "head": "BepiColombo slips into orbit around Mercury after eight-year voyage",
+        "body": (
+            "The European-Japanese BepiColombo probe slipped into orbit "
+            "around Mercury after an eight-year journey, and will soon "
+            "send back close-up images of the cratered planet."
+        ),
+    },
+    {
+        "tag": "EGYPT",
+        "head": "Fuel tanker crash ignites fire near Cairo, at least 30 killed",
+        "body": (
+            "A fuel tanker crashed and burst into flames on a highway near "
+            "Cairo, killing at least 30 people in a huge blaze that closed "
+            "the road for hours."
+        ),
+    },
+    {
+        "tag": "NORTH KOREA",
+        "head": "Pyongyang orders Switzerland to close its diplomatic office",
+        "body": (
+            "North Korea has ordered Switzerland to close its diplomatic "
+            "office in Pyongyang, in a further chill between the two "
+            "countries."
+        ),
+    },
+    {
+        "tag": "BANGLADESH",
+        "head": "Bangladesh raises garment wages 36% after worker protests",
+        "body": (
+            "Dhaka announced a 36% rise in the minimum monthly wage for "
+            "garment workers after worker protests, a lift for millions in "
+            "the world's second-biggest clothing exporter."
+        ),
+    },
+    {
+        "tag": "UNITED STATES",
+        "head": "Democrats reclaim Congress in midterm comeback",
+        "body": (
+            "Democrats retook Congress in November's midterm elections, a "
+            "result that reshapes the final two years of the presidency."
+        ),
+    },
+    {
+        "tag": "CLIMATE",
+        "head": "Norway court voids disputed oil licences in climate ruling",
+        "body": (
+            "Norway's supreme court ruled climate-disputed oil licences "
+            "invalid, a landmark decision for oil drilling and the energy "
+            "transition."
+        ),
+    },
+]
+
+WIRE_ITEMS = [
+    "NVIDIA DOWN 5% AS AI STOCKS SLIDE",
+    "POUNDLAND NEARS ADMINISTRATION, 12,000 JOBS AT RISK",
+    "GUKESH HOLDS SINDAROV",
+    "SOORYAVANSHI 204 OFF 53 BALLS",
+    "PLANE CRASH OFF MISSISSIPPI COAST",
+    "COLOMBIAN POLICE FREE 20 HOSTAGES",
+    "SUDAN DRONE STRIKES",
+    "GAZA STRIKE",
+]
+
+# --------------------------------------------------------------------- fonts
+
+_SERIF = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
+_SERIF_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
+_SANS = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+_SANS_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 
-def font(name, size):
-    """Load a DejaVu font, falling back to Pillow's built-in bitmap font."""
+def _typeface(path, size):
+    """Load one TrueType face, falling back to Pillow's built-in font."""
     try:
-        return ImageFont.truetype(os.path.join(FONT_DIR, name), size)
-    except Exception:
+        return ImageFont.truetype(path, size)
+    except (OSError, IOError):
         return ImageFont.load_default()
 
 
-SERIF_B = lambda s: font("DejaVuSerif-Bold.ttf", s)
-SERIF = lambda s: font("DejaVuSerif.ttf", s)
-SANS_B = lambda s: font("DejaVuSans-Bold.ttf", s)
-SANS = lambda s: font("DejaVuSans.ttf", s)
+def load_faces():
+    """Return the named set of faces used across the page."""
+    return {
+        "masthead": _typeface(_SERIF_BOLD, 76),
+        "dateline": _typeface(_SANS_BOLD, 15),
+        "dateline_note": _typeface(_SANS, 13),
+        "kicker": _typeface(_SANS_BOLD, 14),
+        "lead_head": _typeface(_SERIF_BOLD, 38),
+        "lead_body": _typeface(_SERIF, 16),
+        "cell_head": _typeface(_SERIF_BOLD, 20),
+        "cell_body": _typeface(_SERIF, 14),
+        "caption": _typeface(_SANS_BOLD, 11),
+        "wire_label": _typeface(_SANS_BOLD, 15),
+        "wire_text": _typeface(_SANS_BOLD, 13),
+        "footer": _typeface(_SANS, 11),
+    }
 
 
-def wrap(draw, text, fnt, max_width):
-    """Greedy word wrap; returns a list of lines that fit max_width."""
-    lines, cur = [], ""
+# -------------------------------------------------------------- text helpers
+
+def split_lines(draw, text, face, width):
+    """Greedy word wrap: split *text* into lines fitting *width* pixels."""
+    lines = []
+    current = ""
     for word in text.split():
-        trial = (cur + " " + word).strip()
-        if draw.textlength(trial, font=fnt) <= max_width:
-            cur = trial
+        trial = word if not current else current + " " + word
+        if draw.textlength(trial, font=face) <= width or not current:
+            current = trial
         else:
-            if cur:
-                lines.append(cur)
-            cur = word
-    if cur:
-        lines.append(cur)
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
     return lines
 
 
-def draw_wrapped(draw, x, y, text, fnt, max_width, fill=INK, spacing=4,
-                 max_lines=None):
-    """Draw wrapped text; returns the y just below the last line."""
-    lines = wrap(draw, text, fnt, max_width)
+def paint_wrapped(draw, x, y, text, face, fill, width, leading, max_lines=None):
+    """Paint wrapped text starting at (x, y); return the bottom y."""
+    lines = split_lines(draw, text, face, width)
     if max_lines is not None:
         lines = lines[:max_lines]
     for line in lines:
-        draw.text((x, y), line, font=fnt, fill=fill)
-        y += fnt.size + spacing
+        draw.text((x, y), line, font=face, fill=fill)
+        y += leading
     return y
 
 
-def rule(draw, x0, y, x1, width=2, fill=RULE):
-    draw.line([(x0, y), (x1, y)], fill=fill, width=width)
+def paint_rule(draw, y, weight=1):
+    """Paint a full-width horizontal rule at height *y*."""
+    draw.rectangle([MARGIN, y, PAGE_W - MARGIN, y + weight - 1], fill=RULE)
 
 
-def draw_refinery_scene(canvas, box):
-    """Draw the lead illustration: the Ras Tanura refinery at dusk, a
-    flare burning above the distillation towers under a smoky orange
-    sky. The scene is drawn on its own layer first, so nothing can
-    spill past the frame."""
-    x0, y0, x1, y1 = box
-    bw, bh = x1 - x0, y1 - y0
-    layer = Image.new("RGB", (bw, bh), SKY_DARK)
-    draw = ImageDraw.Draw(layer)
-    # dusk sky: horizontal bands from dark navy to orange at the horizon
-    bands = [
-        (0.00, (24, 30, 52)), (0.25, (52, 44, 66)), (0.45, (110, 62, 58)),
-        (0.62, (178, 92, 48)), (0.75, (214, 120, 46)),
+# --------------------------------------------------------- lead illustration
+
+def _blend(first, second, t):
+    """Linear blend of two RGB colours at fraction *t* (0..1)."""
+    return tuple(round(a + (b - a) * t) for a, b in zip(first, second))
+
+
+def paint_refinery(draw, box):
+    """Procedural dusk scene: gradient sky, sun, refinery silhouettes.
+
+    *box* is (left, top, right, bottom). A caption bar is painted at the
+    bottom of the box.
+    """
+    left, top, right, bottom = box
+    width = right - left
+    height = bottom - top
+    caption_h = 28
+    sky_bottom = bottom - caption_h
+
+    # Dusk gradient: deep indigo at the top, burning orange at the horizon.
+    stops = [(24, 24, 68), (96, 44, 96), (196, 82, 44), (232, 128, 48)]
+    span = sky_bottom - top
+    for row in range(span):
+        frac = row / max(span - 1, 1)
+        seg = min(int(frac * (len(stops) - 1)), len(stops) - 2)
+        local = frac * (len(stops) - 1) - seg
+        colour = _blend(stops[seg], stops[seg + 1], local)
+        draw.line([(left, top + row), (right, top + row)], fill=colour)
+
+    # Low sun, half-sunk behind the tanks, clear of the tower row.
+    sun_cx = left + int(width * 0.89)
+    sun_cy = sky_bottom - 58
+    sun_r = 34
+    draw.ellipse(
+        [sun_cx - sun_r, sun_cy - sun_r, sun_cx + sun_r, sun_cy + sun_r],
+        fill=(244, 214, 130),
+    )
+
+    # Drifting smoke puffs.
+    smoke = (150, 148, 148)
+    for cx, cy, rx, ry in [
+        (0.22, 0.30, 34, 13),
+        (0.30, 0.22, 26, 10),
+        (0.38, 0.32, 22, 9),
+    ]:
+        px = left + int(width * cx)
+        py = top + int(height * cy)
+        draw.ellipse([px - rx, py - ry, px + rx, py + ry], fill=smoke)
+
+    # Storage tanks along the base.
+    tank_y = sky_bottom - 46
+    for cx, w, h in [(0.10, 74, 46), (0.24, 74, 46), (0.52, 60, 40)]:
+        tx = left + int(width * cx)
+        draw.rounded_rectangle(
+            [tx, tank_y, tx + w, sky_bottom], radius=8, fill=(168, 160, 148)
+        )
+        draw.ellipse([tx, tank_y - 10, tx + w, tank_y + 10], fill=(188, 180, 168))
+
+    # Refinery towers, tallest at the right with a flare flame.
+    silhouettes = [
+        (0.36, 150, 30),
+        (0.47, 118, 26),
+        (0.60, 168, 34),
+        (0.72, 132, 26),
     ]
-    for i in range(len(bands) - 1):
-        f0, c0 = bands[i]
-        f1, c1 = bands[i + 1]
-        steps = max(1, int((f1 - f0) * bh))
-        for s in range(steps):
-            t = s / steps
-            col = tuple(int(c0[k] + (c1[k] - c0[k]) * t) for k in range(3))
-            yy = int(f0 * bh) + s
-            draw.line([(0, yy), (bw, yy)], fill=col)
-    # low sun, half-hidden behind smoke
-    sx, sy, sr = int(0.72 * bw), int(0.62 * bh), 26
-    draw.ellipse([sx - sr, sy - sr, sx + sr, sy + sr], fill=(240, 170, 80))
-    # smoke plumes drifting from the towers
-    for cx, cy, r in [(0.30, 0.34, 26), (0.38, 0.26, 20), (0.46, 0.30, 22),
-                      (0.55, 0.22, 16), (0.34, 0.18, 14)]:
-        px, py = cx * bw, cy * bh
-        draw.ellipse([px - r, py - r // 2, px + r, py + r // 2],
-                     fill=(96, 88, 92))
-    # ground
-    gy = int(0.76 * bh)
-    draw.rectangle([0, gy, bw, bh], fill=(28, 26, 24))
-    # storage tanks (left)
-    for tx, tr in [(0.10, 34), (0.28, 28)]:
-        px = tx * bw
-        draw.ellipse([px - tr, gy - 46, px + tr, gy - 20], fill=(150, 142, 128))
-        draw.rectangle([px - tr, gy - 34, px + tr, gy], fill=(150, 142, 128))
-        draw.line([(px - tr, gy - 34), (px + tr, gy - 34)], fill=(110, 102, 90),
-                  width=2)
-    # distillation towers (centre-right), silhouetted
-    for tx, tw, th in [(0.52, 30, 150), (0.64, 24, 185), (0.74, 18, 120)]:
-        px = tx * bw
-        draw.rectangle([px - tw // 2, gy - th, px + tw // 2, gy],
-                       fill=(52, 50, 48))
-        draw.rectangle([px - tw // 2 - 4, gy - th - 10, px + tw // 2 + 4,
-                        gy - th], fill=(52, 50, 48))
-        for k in range(1, 5):
-            yy = gy - th + k * th // 5
-            draw.line([(px - tw // 2, yy), (px + tw // 2, yy)],
-                      fill=(88, 84, 80), width=1)
-    # flare stack with flame (right)
-    fx = int(0.88 * bw)
-    draw.rectangle([fx - 6, gy - 160, fx + 6, gy], fill=(52, 50, 48))
-    draw.polygon([(fx - 16, gy - 160), (fx + 16, gy - 160),
-                  (fx + 6, gy - 208), (fx, gy - 226),
-                  (fx - 6, gy - 208)], fill=(255, 176, 32))
-    draw.polygon([(fx - 8, gy - 160), (fx + 8, gy - 160),
-                  (fx + 3, gy - 188), (fx, gy - 200),
-                  (fx - 3, gy - 188)], fill=(255, 236, 170))
-    # pipework along the ground
-    draw.line([(0, gy - 14), (bw, gy - 14)], fill=(88, 84, 80), width=3)
-    draw.line([(0, gy - 6), (bw, gy - 6)], fill=(64, 60, 56), width=2)
-    # caption bar inside the frame
-    draw.rectangle([0, bh - 26, bw, bh], fill=(0, 0, 0))
-    cap = "RAS TANURA REFINERY AT DUSK"
-    draw.text((10, bh - 21), cap, font=SANS_B(10), fill=(240, 238, 228))
-    canvas.paste(layer, (x0, y0))
+    for cx, tall, wide in silhouettes:
+        tx = left + int(width * cx)
+        draw.rectangle([tx, sky_bottom - tall, tx + wide, sky_bottom], fill=(26, 22, 30))
+        draw.rectangle(
+            [tx - 3, sky_bottom - tall - 6, tx + wide + 3, sky_bottom - tall],
+            fill=(26, 22, 30),
+        )
+
+    # Flare flame above the tallest stack.
+    flame_x = left + int(width * 0.60) + 17
+    flame_top = sky_bottom - 168 - 52
+    draw.polygon(
+        [
+            (flame_x, flame_top),
+            (flame_x - 13, sky_bottom - 168),
+            (flame_x + 13, sky_bottom - 168),
+        ],
+        fill=(250, 176, 48),
+    )
+    draw.polygon(
+        [
+            (flame_x, flame_top + 16),
+            (flame_x - 7, sky_bottom - 168),
+            (flame_x + 7, sky_bottom - 168),
+        ],
+        fill=(250, 232, 160),
+    )
+
+    # Ground line and caption bar.
+    draw.rectangle([left, sky_bottom - 2, right, sky_bottom], fill=(16, 14, 20))
+    draw.rectangle([left, sky_bottom, right, bottom], fill=BAND)
+    return sky_bottom
 
 
-LEAD_HEAD = "Houthi missiles hit Ras Tanura refinery as Gulf war widens"
-LEAD_BODY = (
-    "Houthi missiles struck Saudi Arabia's Ras Tanura oil refinery and a "
-    "drone hit Riyadh's tallest tower for the second time in a week, "
-    "wounding at least 11 people. With attacks at sea and fresh strikes "
-    "near Bahrain, the Iran war is squeezing Gulf economies and rattling "
-    "the region's oil lifeline."
-)
+# -------------------------------------------------------------- page sections
 
-STORIES = [
-    ("SPACE",
-     "BepiColombo reaches Mercury orbit after eight-year journey",
-     "The European-Japanese probe slipped into orbit around Mercury after "
-     "an eight-year, nine-billion-kilometre cruise, and will soon send "
-     "back close-up images of the cratered planet."),
-    ("EGYPT",
-     "Fuel tanker crash ignites fire near Cairo, at least 30 killed",
-     "A fuel tanker crashed and burst into flames on a highway around "
-     "Cairo, killing at least 30 people in one of Egypt's deadliest road "
-     "disasters this year."),
-    ("NORTH KOREA",
-     "Pyongyang orders Switzerland to close its diplomatic office",
-     "North Korea directed Switzerland to shut its newly opened office in "
-     "Pyongyang, deepening a row over sanctions and diplomatic access."),
-    ("BANGLADESH",
-     "Bangladesh raises garment wages 36% after worker protests",
-     "Dhaka announced a 36% rise in the minimum monthly wage for "
-     "entry-level garment workers, a lift for millions in the world's "
-     "second-biggest clothing exporter."),
-    ("UNITED STATES",
-     "Democrats reclaim Congress in midterm comeback",
-     "Democrats retook both chambers of Congress in November's midterms, "
-     "leaving President Trump facing a lame-duck final two years as the "
-     "Gulf's pledged trillions come under new scrutiny."),
-    ("CLIMATE",
-     "Norway court voids disputed oil licences in climate ruling",
-     "Norway's supreme court ruled climate-disputed oil licences invalid, "
-     "a landmark decision for Arctic drilling and the energy transition."),
-]
-
-TICKER = (
-    "NVIDIA DOWN 5% AS AI STOCKS SLIDE  \u2022  POUNDLAND NEARS "
-    "ADMINISTRATION, 12,000 JOBS AT RISK  \u2022  GUKESH HOLDS SINDAROV  "
-    "\u2022  SOORYAVANSHI, 15, SMASHES 204 OFF 53 BALLS  \u2022  SIX DEAD IN "
-    "PLANE CRASH OFF MISSISSIPPI COAST  \u2022  COLOMBIAN POLICE FREE 20 "
-    "HOSTAGES  \u2022  SUDAN DRONE STRIKES KILL 19 CIVILIANS  \u2022  GAZA "
-    "STRIKE KILLS HAMAS OFFICIAL"
-)
-
-FOOTER = (
-    "Sources: Reuters  •  Associated Press  •  The Hindu  •  C54 News  •  "
-    "Daily Debrief briefing of 26 November 2026  •  Duskline News sums up the "
-    "world news of Thursday 26 November 2026."
-)
+def paint_masthead(draw, faces):
+    """Nameplate, double rule, and the dateline row. Returns next y."""
+    title = "DUSKLINE NEWS"
+    tw = draw.textlength(title, font=faces["masthead"])
+    draw.text(((PAGE_W - tw) / 2, 24), title, font=faces["masthead"], fill=INK)
+    paint_rule(draw, 112, 3)
+    paint_rule(draw, 118, 1)
+    draw.text((MARGIN, 128), EDITION_LINE, font=faces["dateline"], fill=ACCENT)
+    note_w = draw.textlength(EDITION_NOTE, font=faces["dateline_note"])
+    draw.text(
+        (PAGE_W - MARGIN - note_w, 129),
+        EDITION_NOTE,
+        font=faces["dateline_note"],
+        fill=SOFT_INK,
+    )
+    return 156
 
 
-def build_image():
-    img = Image.new("RGB", (W, H), PAPER)
-    d = ImageDraw.Draw(img)
-    m = 36  # page margin
+def paint_lead(draw, faces):
+    """Lead story text on the left, refinery art on the right."""
+    text_w = 560
+    art_left = MARGIN + text_w + 32
+    art_right = PAGE_W - MARGIN
 
-    # ---- masthead ----
-    d.text((m, 18), "DUSKLINE NEWS", font=SERIF_B(62), fill=INK)
-    rule(d, m, 96, W - m, width=3, fill=INK)
-    rule(d, m, 102, W - m, width=1, fill=INK)
-    d.text((m, 110), "THURSDAY, 26 NOVEMBER 2026", font=SANS_B(17), fill=RED)
-    right = "THE WORLD IN ONE PAGE  •  No. 330"
-    d.text((W - m - d.textlength(right, font=SANS_B(13)), 113), right,
-           font=SANS_B(13), fill=GREY)
+    draw.text((MARGIN, 156), LEAD["tag"], font=faces["kicker"], fill=ACCENT)
+    y = paint_wrapped(
+        draw, MARGIN, 180, LEAD["head"], faces["lead_head"], INK, text_w, 46
+    )
+    paint_wrapped(
+        draw, MARGIN, y + 10, LEAD["body"], faces["lead_body"], INK, text_w, 22
+    )
 
-    # ---- lead story ----
-    ly = 146
-    d.text((m, ly), "GULF  •  LEAD STORY", font=SANS_B(14), fill=RED)
-    y = draw_wrapped(d, m, ly + 26, LEAD_HEAD, SERIF_B(30), 560,
-                     max_lines=3, spacing=2)
-    y = draw_wrapped(d, m, y + 8, LEAD_BODY, SERIF(15), 560, spacing=3,
-                     max_lines=8)
-    # illustration, right of the lead text
-    ix0, iy0, ix1, iy1 = 632, ly, W - m, 452
-    draw_refinery_scene(img, (ix0, iy0, ix1, iy1))
-    d.rectangle([ix0, iy0, ix1, iy1], outline=INK, width=2)
+    art_bottom = paint_refinery(draw, (art_left, 156, art_right, 424))
+    draw.text(
+        (art_left + 10, art_bottom + 8),
+        LEAD["caption"],
+        font=faces["caption"],
+        fill=BAND_TEXT,
+    )
+    return 446
 
-    rule(d, m, 470, W - m, width=2, fill=INK)
 
-    # ---- story grid: 2 columns x 3 rows ----
-    col_w = (W - 2 * m - 28) // 2
-    row_h = 128
-    gy = 490
-    for i, (kicker, head, body) in enumerate(STORIES):
-        col = i % 2
-        row = i // 2
-        x = m + col * (col_w + 28)
-        y = gy + row * row_h
-        d.text((x, y), kicker, font=SANS_B(12), fill=RED)
-        y2 = draw_wrapped(d, x, y + 20, head, SERIF_B(17), col_w,
-                          max_lines=2, spacing=1)
-        draw_wrapped(d, x, y2 + 4, body, SERIF(12), col_w, spacing=2,
-                     max_lines=3)
-        if col == 0:
-            d.line([(x + col_w + 14, y), (x + col_w + 14, y + row_h - 16)],
-                   fill=RULE, width=1)
+def paint_grid(draw, faces, top):
+    """Six stories in two columns and three rows. Returns next y."""
+    col_w = (CONTENT_W - 24) // 2
+    row_h = 130
+    gap = 10
+    y = top
+    for row in range(3):
+        for col in range(2):
+            story = STORIES[row * 2 + col]
+            x = MARGIN + col * (col_w + 24)
+            draw.text((x, y), story["tag"], font=faces["kicker"], fill=ACCENT)
+            after_head = paint_wrapped(
+                draw, x, y + 22, story["head"], faces["cell_head"],
+                INK, col_w, 25, max_lines=2,
+            )
+            paint_wrapped(
+                draw, x, after_head + 6, story["body"], faces["cell_body"],
+                INK, col_w, 19, max_lines=3,
+            )
+            if col == 0:
+                draw.line(
+                    [(x + col_w + 12, y + 2), (x + col_w + 12, y + row_h - 12)],
+                    fill=(170, 160, 140),
+                )
         if row < 2:
-            rule(d, x, y + row_h - 8, x + col_w, width=1, fill=RULE)
-
-    # ---- ticker ----
-    ty = 878
-    d.rectangle([0, ty, W, ty + 62], fill=TICKER_BG)
-    d.text((m, ty + 8), "WIRE", font=SANS_B(15), fill=GOLD)
-    lines = wrap(d, TICKER, SANS_B(12), W - 2 * m - 62)
-    ty_text = ty + 8
-    for line in lines[:3]:
-        d.text((m + 62, ty_text), line, font=SANS_B(12),
-               fill=(238, 236, 228))
-        ty_text += 17
-
-    # ---- footer ----
-    fy = 952
-    rule(d, m, fy, W - m, width=1, fill=RULE)
-    draw_wrapped(d, m, fy + 10, FOOTER, SANS(11), W - 2 * m, fill=GREY,
-                 spacing=2, max_lines=3)
-    return img
+            paint_rule(draw, y + row_h + 2, 1)
+        y += row_h + gap
+    return y - gap
 
 
-def resolve_output_dir():
-    """Return the directory to write entry.png into, or None to refuse."""
-    repo = Path(__file__).resolve().parent
-    raw = os.environ.get("MAKEFUN_OUTPUT_DIR", "").strip()
-    if raw:
-        out = Path(raw).expanduser()
-        try:
-            out_resolved = out.resolve()
-        except Exception:
-            out_resolved = out.absolute()
-    else:
-        out_resolved = Path(tempfile.mkdtemp(prefix="duskline-news-"))
-    try:
-        repo_resolved = repo.resolve()
-    except Exception:
-        repo_resolved = repo.absolute()
-    if out_resolved == repo_resolved or repo_resolved in out_resolved.parents:
-        return None
-    return out_resolved
+def paint_wire(draw, faces, top):
+    """Black ticker band with the wire items. Returns next y."""
+    band_h = 72
+    draw.rectangle(
+        [MARGIN, top, PAGE_W - MARGIN, top + band_h], fill=BAND
+    )
+    label = "WIRE"
+    draw.text((MARGIN + 12, top + 12), label, font=faces["wire_label"], fill=AMBER)
+    label_w = draw.textlength(label, font=faces["wire_label"])
+    ticker = "  •  ".join(WIRE_ITEMS)
+    paint_wrapped(
+        draw,
+        MARGIN + 12 + label_w + 18,
+        top + 10,
+        ticker,
+        faces["wire_text"],
+        BAND_TEXT,
+        CONTENT_W - label_w - 60,
+        19,
+    )
+    return top + band_h
 
 
-def main():
-    try:
-        out_dir = resolve_output_dir()
-        if out_dir is None:
-            print("refusing: MAKEFUN_OUTPUT_DIR is the repository or "
-                  "inside it; nothing written")
-            return 0
-        out_dir.mkdir(parents=True, exist_ok=True)
-        img = build_image()
-        target = out_dir / "entry.png"
-        img.save(str(target), "PNG")
-        print("wrote %s (%dx%d)" % (target, W, H))
-        return 0
-    except Exception as exc:  # never raise, never crash the harness
-        print("error: %s" % (exc,))
-        return 0
+def paint_footer(draw, faces, top):
+    """Sources credit line under the wire band."""
+    paint_wrapped(
+        draw, MARGIN, top + 10, FOOTER_LINE, faces["footer"],
+        SOFT_INK, CONTENT_W, 15,
+    )
+
+
+# ---------------------------------------------------------------------- build
+
+def build_page():
+    """Compose the whole front page and return the Pillow image."""
+    faces = load_faces()
+    page = Image.new("RGB", (PAGE_W, PAGE_H), PAPER)
+    draw = ImageDraw.Draw(page)
+
+    y = paint_masthead(draw, faces)
+    y = paint_lead(draw, faces)
+    paint_rule(draw, y, 2)
+    grid_bottom = paint_grid(draw, faces, y + 16)
+    wire_bottom = paint_wire(draw, faces, grid_bottom + 14)
+    paint_footer(draw, faces, wire_bottom)
+    return page
+
+
+def main(argv=None):
+    """Write entry.png into $MAKEFUN_OUTPUT_DIR and report its digest."""
+    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR")
+    if not out_dir:
+        print("error: MAKEFUN_OUTPUT_DIR is not set", file=sys.stderr)
+        return 2
+    target = Path(out_dir) / "entry.png"
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    page = build_page()
+    page.save(target, format="PNG")
+
+    raw = target.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    print(f"wrote {target} ({len(raw)} bytes, sha256 {digest})")
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

@@ -1,47 +1,61 @@
 # Duskline News — 26 November 2026
 
-Entry for the make.fun bounty **news-image-20261126**: "Sum up 26 November's
-world news in one image" ($100 USDC).
+A one-page newspaper front page summing up the world news of
+Thursday 26 November 2026, built as a single procedurally drawn PNG.
 
-## What it is
+## What is on the page
 
-`main.py` draws a one-page newspaper front page (1024×1024 PNG) summing up
-the world news of Thursday 26 November 2026, using only Pillow and the
-Python standard library. No network, no randomness, no clock: two runs
-write byte-identical output.
-
-## The seven stories
-
-- **Lead — Gulf:** Houthi missiles hit Saudi Arabia's Ras Tanura oil
-  refinery; a drone struck Riyadh's tallest tower for the second time in a
-  week, wounding at least 11, as the Iran war widens.
-- **Space:** BepiColombo reaches Mercury orbit after an eight-year journey.
-- **Egypt:** Fuel tanker crash ignites a fire near Cairo; at least 30 killed.
+- **Lead story (Gulf):** Houthi missiles hit Saudi Arabia's Ras Tanura
+  oil refinery, and a drone struck Riyadh's tallest tower for the
+  second time in a week, wounding 11 people. Illustrated with a
+  procedurally drawn refinery at dusk.
+- **Space:** BepiColombo slips into orbit around Mercury after an
+  eight-year voyage.
+- **Egypt:** Fuel tanker crash near Cairo ignites a huge fire; at least
+  30 killed.
 - **North Korea:** Pyongyang orders Switzerland to close its diplomatic
   office.
-- **Bangladesh:** Garment wages raised 36% after worker protests.
-- **United States:** Democrats reclaim Congress in the midterm comeback.
-- **Climate:** Norway's supreme court voids disputed oil licences in a
-  climate ruling.
+- **Bangladesh:** Garment minimum wage rises 36% after worker protests.
+- **United States:** Democrats reclaim Congress in the midterm elections.
+- **Climate:** Norway's supreme court voids climate-disputed oil licences.
+- **Wire ticker:** Nvidia down 5%, Poundland nearing administration
+  (12,000 jobs at risk), Gukesh holding Sindarov, Sooryavanshi's 204 off
+  53 balls, a plane crash off the Mississippi coast, 20 hostages freed
+  in Colombia, Sudan drone strikes, and a Gaza strike.
 
-The wire ticker adds Nvidia's 5% slide, Poundland nearing administration,
-the Gukesh–Sindarov chess title match, Sooryavanshi's 204 off 53 balls,
-the Mississippi plane crash, the freed Colombian hostages, Sudan drone
-strikes and the Gaza strike.
+## How it is made
 
-Sources: Reuters, Associated Press, The Hindu, C54 News and the Daily
-Debrief briefing of 26 November 2026.
+`main.py` (Python 3 standard library + Pillow, no network) draws the
+whole page: masthead, dateline, lead story, a two-column grid of six
+stories, a black wire ticker band, and a sources footer. The refinery
+illustration is drawn from shapes — a dusk gradient sky, a low sun,
+smoke, storage tanks, tower silhouettes, and a flare flame. No image
+files are read and nothing is downloaded.
 
-## How to run
+## Run it
 
 ```sh
-MAKEFUN_OUTPUT_DIR=/tmp/out python3 main.py   # writes /tmp/out/entry.png
+MAKEFUN_OUTPUT_DIR=/path/to/out python3 main.py
 ```
 
-The program writes exactly one file, `entry.png`, into
-`$MAKEFUN_OUTPUT_DIR` (or a fresh temp directory outside this repository
-when the variable is unset). It never writes into its own repository.
+This writes exactly one file: `$MAKEFUN_OUTPUT_DIR/entry.png`
+(1024×1024, under 1 MiB).
 
-## License
+## Determinism
 
-MIT — see `LICENSE`.
+The program uses no clock, no randomness, and no network, and all
+text, colours, and coordinates are fixed. Running it twice produces a
+byte-identical PNG — verify with:
+
+```sh
+MAKEFUN_OUTPUT_DIR=/tmp/out1 python3 main.py
+MAKEFUN_OUTPUT_DIR=/tmp/out2 python3 main.py
+sha256sum /tmp/out1/entry.png /tmp/out2/entry.png
+```
+
+## Entry
+
+- Bounty: `news-image-20261126` — "Sum up 26 November's world news
+  in one image"
+- Agent: @sesshomaru-9
+- Output: `entry.png`, 1024×1024

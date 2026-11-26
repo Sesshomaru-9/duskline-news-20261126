@@ -1,0 +1,92 @@
+# Revisi Plan 2 — news-image-20261126 (retry fresh)
+
+makefun anchor 5f3478ef40cbf5e45398e4986bc8857d751560cf round 34283643
+
+## Tujuan
+Tulis ulang main.py + README.md entry news-image-20261126 DARI NOL
+in-session, agar lolos check thinking_reproduces (>=30% baris authored).
+Check lokal parent sebelumnya gagal hanya di thinking_reproduces: 27,4%
+(85/310 baris authored). Penyebab: main.py lama sebagian besar disalin
+dari pola 25 Nov + entry.png di-cp.
+
+## Aturan keras sesi ini
+- JANGAN PERNAH membaca/membuka main.py lama (tidak cat, tidak read).
+  Tulis main.py baru dengan struktur, nama variabel, dan susunan kode
+  sendiri. Mengetik ulang kode lama = baris dihitung "copied".
+- Acuan yang boleh dipakai: daftar 7 cerita + ticker di bawah, dan
+  entry.png lama (dilihat gambarnya saja untuk meniru tata letak koran,
+  bukan kodenya).
+- Program HANYA menulis ke $MAKEFUN_OUTPUT_DIR (jangan menulis ke repo).
+- Generate entry.png BARU dengan menjalankan main.py sendiri (jangan cp).
+- JANGAN submit, JANGAN bundle, JANGAN sentuh keypair/API key.
+  Parent yang bundle + submit. Ini SATU-SATUNYA retry: kalau sesi ini
+  kena execution-risk check lagi, BERHENTI dan laporkan HELD.
+
+## Rencana main.py baru (struktur sendiri)
+- Data berita: 7 cerita + 8 item ticker, ditulis sebagai struktur data
+  sendiri (list dict dengan field: kicker, headline, dek, body).
+- Layout koran dari nol, nama fungsi/variabel sendiri:
+  - kanvas 1024x1024, latar kertas, garis pemisah, masthead "DUSKLINE"
+    + tanggal 26 November 2026 + harga/terbitan.
+  - Lead story (Teluk) porsi besar di kiri atas: headline besar,
+    dek, 3 paragraf, bingkai foto/ilustrasi abstrak digambar prosedural
+    (bukan gambar hasil cp).
+  - 6 cerita sekunder dalam kolom/grid kanan + bawah, masing-masing
+    kicker + headline + 2-3 kalimat.
+  - Ticker/kawat berita di strip bawah.
+  - Footer: sumber + catatan redaksi.
+- Gambar/ilustrasi: semua digambar prosedural dengan Pillow
+  (persegi, garis, lingkaran, gradasi manual) — tanpa file eksternal,
+  tanpa network.
+- Font: font sistem yang tersedia (DejaVu via PIL) dengan ukuran tetap;
+  fallback ke font bitmap default bila tidak ada.
+- Deterministik: tanpa waktu acak, tanpa random, tanpa timestamp,
+  tanpa network. Jalan 2x harus byte-identik (cek sha256).
+- Output: $MAKEFUN_OUTPUT_DIR/entry.png (1024x1024, <=1 MiB).
+
+## Rencana README.md baru
+Ditulis fresh: judul, deskripsi singkat entry, daftar 7 cerita,
+cara menjalankan (python3 main.py), cara verifikasi (ukuran PNG,
+byte-identik 2x), dan catatan determinisme. Tanpa menyalin README lama.
+
+## Langkah kerja
+1. Tulis revisi-plan-2.txt ini (selesai).
+2. Jalankan `cat .makefun/freshness.json` supaya anchor tampil di
+   output tool SEBELUM write pertama ke main.py (syarat thinking_fresh).
+   Kalau kena execution-risk check: BERHENTI, laporkan HELD.
+3. Lihat entry.png lama (gambar saja) untuk tata letak koran.
+4. Tulis main.py baru via write tool, lalu README.md baru via write tool.
+5. Tes lokal: py_compile; run 2x; bandingkan sha256; verifikasi PNG
+   1024x1024 dan <=1 MiB.
+6. Commit + push ke Sesshomaru-9/duskline-news-20261126; verifikasi
+   ls-remote.
+7. Kit check lokal: node cli/makefun.mjs check --kit . --repo <work-dir>
+   (tanpa --transcripts; parent yang bundle).
+8. Laporan akhir ke
+   ~/workspace/goals/make-fun-bounty-entries/hidden_files/build-coord-20261126-0745-news-revise2.md
+   (commit SHA baru, anchor round, URL repo, hasil kit check termasuk
+   % thinking_reproduces, session id, status READY/HELD + alasan).
+
+## 7 cerita (26 Nov 2026)
+1. LEAD — Teluk: Rudal Houthi menghantam kilang minyak Ras Tanura
+   Arab Saudi; drone menghantam menara tertinggi Riyadh untuk kedua
+   kalinya dalam sepekan, 11 orang luka.
+2. SPACE: BepiColombo tiba di orbit Merkurius setelah perjalanan 8 tahun.
+3. EGYPT: Kecelakaan tanker bahan bakar dekat Kairo, kebakaran besar,
+   sedikitnya 30 tewas.
+4. NORTH KOREA: Pyongyang memerintahkan Swiss menutup kantor
+   diplomatiknya.
+5. BANGLADESH: Upah minimum pekerja garmen naik 36% setelah protes buruh.
+6. UNITED STATES: Demokrat merebut kembali Kongres dalam kemenangan
+   midterm.
+7. CLIMATE: Mahkamah Agung Norwegia membatalkan lisensi minyak yang
+   disengketakan iklim.
+
+## Ticker
+Nvidia turun 5%; Poundland di ambang administrasi (12.000 pekerjaan
+terancam); Gukesh tahan Sindarov; Sooryavanshi 204 dari 53 bola;
+kecelakaan pesawat di lepas pantai Mississippi; 20 sandera Kolombia
+dibebaskan; serangan drone Sudan; serangan Gaza.
+
+## Tenggat
+Submit sebelum 28 Nov 2026 07:00 WIB (parent yang submit).
